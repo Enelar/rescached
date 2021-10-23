@@ -131,14 +131,38 @@ int ClientWorker::_queue_check_ttl(BNode* qnode, ResQueue* q, NCR* ncr)
 				);
 		}
 
-		return -1;
+		// This is stale-while-revalidate stategy
+		// https://web.dev/stale-while-revalidate/
+		// Helps with records that always has 0 ttl
+
+		// In unlikely event of wrong reply, it still forces
+		// client to refresh dns record on next query
+		return 0;
 	}
 
 	diff = (int) difftime(ncr->_ttl, now);
 
+	// Return every record with ttl - 2 minutes
+	// This increases chances that we will reply from valid cache
+	// Just a nice addon, doesn't required because s-w-r is safe
+	if (diff < 120) {
+		int s = _queue_ask_question(qnode, q);
+
+		if (DBG_LVL_IS_1 && s == 0) {
+			dlog.out("%8s: %3d %6ds %s\n"
+				, TAG_RENEW
+				, q->_qstn->_q_type
+				, diff
+				, q->_qstn->_name.chars()
+				);
+		}
+
+		return 0;
+	}
+
 	_nc.increase_stat_and_rebuild(ncr->_p_list);
 
-	return diff;
+	return diff - 120;
 }
 
 /**
